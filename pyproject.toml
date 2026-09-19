@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "toolframe-storage-sqlite"
+version = "0.1.0"
+description = "Isolated managed SQLite stores for Toolframe plugins"
+requires-python = ">=3.14"
+dependencies = ["toolframe-sdk==0.1.0"]
+
+[project.entry-points."toolframe.plugins"]
+storage-sqlite = "toolframe_storage_sqlite.plugin:plugin"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1"]
+
+[tool.uv.sources]
+toolframe-sdk = { path = "../toolframe-sdk", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py314"
