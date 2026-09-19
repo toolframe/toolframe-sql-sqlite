@@ -284,3 +284,32 @@ async def test_failed_and_nontransactional_migrations_roll_back_schema_and_histo
             assert original["current"] == "v1" and original["pending"] == []
     with caller(), pytest.raises(PluginError):
         await invoke(storage, "query", sql="SELECT failed FROM entries")
+
+
+async def test_schema_inspection_is_read_only_and_can_reconcile_lost_ack(storage):
+    with caller(admin=True):
+        absent = await storage.invoke(ADMIN_SERVICE, "inspect", {"owner": "new-owner"})
+        assert absent == {"exists": False, "history": [], "revision": None}
+        await storage.invoke(
+            ADMIN_SERVICE, "plan", {"owner": "new-owner", "schema": schema()}
+        )
+        assert not (storage.directory / "new-owner").exists()
+        before = await storage.invoke(ADMIN_SERVICE, "inspect", {"owner": "alpha"})
+        upgrade = schema(
+            Migration(
+                revision="v2",
+                parent="v1",
+                sql="ALTER TABLE entries ADD COLUMN version INTEGER NOT NULL DEFAULT 1;",
+            )
+        )
+        plan = await storage.invoke(
+            ADMIN_SERVICE, "plan", {"owner": "alpha", "schema": upgrade}
+        )
+        await storage.invoke(
+            ADMIN_SERVICE,
+            "apply",
+            {"owner": "alpha", "schema": upgrade, "plan_id": plan["plan_id"]},
+        )
+        after = await storage.invoke(ADMIN_SERVICE, "inspect", {"owner": "alpha"})
+        assert before["revision"] == "v1" and after["revision"] == "v2"
+        assert after["history"][: len(before["history"])] == before["history"]

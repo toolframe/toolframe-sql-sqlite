@@ -213,9 +213,10 @@ class SqliteProvider(Plugin):
             )
         return connection
 
-    def plan(self, owner, schema):
-        schema = StoreSchema.model_validate(schema)
-        connection = self.connect(owner, create=True)
+    def inspect(self, owner):
+        if not (self.directory / owner / "data.sqlite").exists():
+            return {"exists": False, "history": [], "revision": None}
+        connection = self.connect(owner)
         try:
             history = [
                 dict(row)
@@ -223,30 +224,39 @@ class SqliteProvider(Plugin):
                     "SELECT * FROM _toolframe_migrations ORDER BY position"
                 )
             ]
-            for index, row in enumerate(history):
-                if (
-                    index >= len(schema.migrations)
-                    or row["revision"] != schema.migrations[index].revision
-                    or row["checksum"] != schema.migrations[index].checksum
-                ):
-                    raise PluginError(
-                        "schema_incompatible",
-                        "Migration history was changed, removed or downgraded",
-                    )
-            pending = [item.model_dump() for item in schema.migrations[len(history) :]]
-            current = history[-1]["revision"] if history else None
-            value = {
-                "owner": owner,
-                "current": current,
-                "target": schema.revision,
-                "pending": pending,
+            return {
+                "exists": True,
                 "history": history,
-                "requires_apply": bool(history and pending),
+                "revision": history[-1]["revision"] if history else None,
             }
-            value["plan_id"] = digest(value)
-            return value
         finally:
             connection.close()
+
+    def plan(self, owner, schema):
+        schema = StoreSchema.model_validate(schema)
+        history = self.inspect(owner)["history"]
+        for index, row in enumerate(history):
+            if (
+                index >= len(schema.migrations)
+                or row["revision"] != schema.migrations[index].revision
+                or row["checksum"] != schema.migrations[index].checksum
+            ):
+                raise PluginError(
+                    "schema_incompatible",
+                    "Migration history was changed, removed or downgraded",
+                )
+        pending = [item.model_dump() for item in schema.migrations[len(history) :]]
+        current = history[-1]["revision"] if history else None
+        value = {
+            "owner": owner,
+            "current": current,
+            "target": schema.revision,
+            "pending": pending,
+            "history": history,
+            "requires_apply": bool(history and pending),
+        }
+        value["plan_id"] = digest(value)
+        return value
 
     def migrate(self, owner, schema, *, expected=None, initialize=False):
         plan = self.plan(owner, schema)
@@ -268,7 +278,7 @@ class SqliteProvider(Plugin):
             raise PluginError(
                 "store_busy", "Drain all owner transactions before migration"
             )
-        connection = self.connect(owner)
+        connection = self.connect(owner, create=True)
         backup_path = None
         try:
             if plan["history"]:
@@ -373,6 +383,8 @@ class SqliteProvider(Plugin):
                         self._rollback(token)
                 return {}
             owner, _ = self.identity(admin=True, owner=params.get("owner"))
+            if method == "inspect":
+                return self.inspect(owner)
             if method == "plan":
                 return self.plan(owner, params["schema"])
             if method == "ensure_store":
@@ -518,7 +530,7 @@ plugin = PluginDefinition(
         ADMIN_SERVICE: ServiceSpec(
             methods={
                 name: MethodSpec()
-                for name in ("ensure_store", "plan", "apply", "cleanup_root")
+                for name in ("inspect", "ensure_store", "plan", "apply", "cleanup_root")
             }
         ),
     },
