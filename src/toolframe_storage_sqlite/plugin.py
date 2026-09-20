@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from toolframe_sdk import (
+    AuthorizationSpec,
     MethodSpec,
     Plugin,
     PluginDefinition,
@@ -513,10 +514,13 @@ plugin = PluginDefinition(
     kind="provider",
     provider_kind="storage",
     factory="toolframe_storage_sqlite.plugin:SqliteProvider",
+    authorization=AuthorizationSpec(),
     services={
         SQL_SERVICE: ServiceSpec(
             methods={
-                name: MethodSpec(read_only=name in ("query", "receipt"))
+                name: MethodSpec(
+                    audience="internal", read_only=name in ("query", "receipt")
+                )
                 for name in (
                     "query",
                     "execute",
@@ -529,7 +533,7 @@ plugin = PluginDefinition(
         ),
         ADMIN_SERVICE: ServiceSpec(
             methods={
-                name: MethodSpec()
+                name: MethodSpec(audience="internal")
                 for name in ("inspect", "ensure_store", "plan", "apply", "cleanup_root")
             }
         ),

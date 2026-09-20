@@ -4,10 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "toolframe-storage-sqlite"
-version = "0.1.0"
+version = "0.2.0"
 description = "Isolated managed SQLite stores for Toolframe plugins"
 requires-python = ">=3.14"
-dependencies = ["toolframe-sdk==0.1.0"]
+dependencies = ["toolframe-sdk==0.2.0"]
 
 [project.entry-points."toolframe.plugins"]
 storage-sqlite = "toolframe_storage_sqlite.plugin:plugin"
