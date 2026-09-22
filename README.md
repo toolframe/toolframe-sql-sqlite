@@ -27,3 +27,7 @@ owning plugin's business service. There are no cross-database transactions.
 Development: `uv sync --group dev`, `uv run pytest -q`, `uv build --no-sources`.
 The sibling SDK UV source is a development convenience; wheels depend only on the
 published SDK contract.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
