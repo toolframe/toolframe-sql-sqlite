@@ -7,6 +7,9 @@ dist/
 *.egg-info/
 .coverage
 .DS_Store
+/build/
+/.coverage
+/htmlcov/
 
 # Local working documents, issue state, and development worktrees.
 /.local/
