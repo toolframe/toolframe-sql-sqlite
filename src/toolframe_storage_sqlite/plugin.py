@@ -451,23 +451,48 @@ class SqliteProvider(Plugin):
                 self.transactions.pop(token)
                 connection.close()
                 return result
-            if method not in ("query", "execute"):
+            if method not in ("query", "execute", "execute_returning"):
                 raise PluginError("method_not_found", method)
             sql, parameters = params["sql"], params.get("parameters", [])
             fingerprint = digest({"sql": sql, "parameters": parameters})
+            if method == "execute_returning":
+                fingerprint = digest(
+                    {"sql": sql, "parameters": parameters, "returning": True}
+                )
             mutation_id = None
-            if method == "execute" and not transaction:
+            if method in ("execute", "execute_returning") and not transaction:
                 mutation_id = self.mutation_id(params)
                 prior = self.receipt(connection, mutation_id, fingerprint)
                 if prior is not None:
                     return prior
                 connection.execute("BEGIN IMMEDIATE")
-            connection.set_authorizer(business_guard(read_only=method == "query"))
+            base_guard = business_guard(read_only=method == "query")
+            mutation_seen = False
+
+            def authorize(action, *arguments):
+                nonlocal mutation_seen
+                if action in (
+                    sqlite3.SQLITE_INSERT,
+                    sqlite3.SQLITE_UPDATE,
+                    sqlite3.SQLITE_DELETE,
+                ):
+                    mutation_seen = True
+                return base_guard(action, *arguments)
+
+            connection.set_authorizer(authorize)
             connection.set_progress_handler(
                 lambda: time.time() > info["deadline"], 1000
             )
             cursor = connection.execute(sql, parameters)
-            if method == "query":
+            if method in ("query", "execute_returning"):
+                if method == "execute_returning" and not mutation_seen:
+                    raise PluginError(
+                        "mutation_required", "Use query for read-only statements"
+                    )
+                if method == "execute_returning" and not cursor.description:
+                    raise PluginError(
+                        "result_required", "Mutation must include RETURNING"
+                    )
                 rows = cursor.fetchmany(10001)
                 if len(rows) > 10000:
                     raise PluginError(
@@ -475,6 +500,8 @@ class SqliteProvider(Plugin):
                         "Use LIMIT/pagination; query exceeds 10,000 rows",
                     )
                 result = [dict(row) for row in rows]
+                if method == "execute_returning":
+                    result = {"rows": result, "rowcount": cursor.rowcount}
             else:
                 if cursor.description:
                     raise PluginError(
@@ -524,6 +551,7 @@ plugin = PluginDefinition(
                 for name in (
                     "query",
                     "execute",
+                    "execute_returning",
                     "begin",
                     "commit",
                     "rollback",

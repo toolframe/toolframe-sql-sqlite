@@ -4,7 +4,7 @@
 
 Install Python 3.14.7, uv 0.12.8, Git and Bash. Keep a readable sibling
 `../toolframe-sdk` Git checkout containing commit
-`ef15b3575615839f24b2710beb3e40f9ae3ca2aa`. Then run:
+`121e60eb5ba77717a382cd474c7a31d2de086d13`. Then run:
 
 ```sh
 uv python install 3.14.7

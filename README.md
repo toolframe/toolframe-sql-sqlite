@@ -34,3 +34,9 @@ see [CI and publishing](docs/ci.md).
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Version 0.3 adds `execute_returning` for mutations with a `RETURNING` clause. It
+returns `rows` and `rowcount`, including within transactions and durable mutation
+receipts. Existing SQLite SQL, migration checksums and `execute` results are
+preserved; PostgreSQL variants in migration declarations do not change SQLite
+history.

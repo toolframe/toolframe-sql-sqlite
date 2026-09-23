@@ -188,6 +188,34 @@ async def test_replayed_mutation_and_root_loss(storage):
         ) == [{"count": 1}]
 
 
+async def test_returning_mutations_preserve_receipts_and_transactions(storage):
+    with caller():
+        params = {
+            "sql": "INSERT INTO entries(label) VALUES (?) RETURNING id",
+            "parameters": ["returned"],
+            "mutation_id": "returned",
+        }
+        result = await invoke(storage, "execute_returning", **params)
+        assert result == {"rows": [{"id": 1}], "rowcount": 1}
+        assert await invoke(storage, "execute_returning", **params) == result
+        assert (await invoke(storage, "receipt", mutation_id="returned"))[
+            "receipt"
+        ] == result
+        transaction = (await invoke(storage, "begin", mutation_id="rolled-returning"))[
+            "transaction"
+        ]
+        await invoke(
+            storage,
+            "execute_returning",
+            sql="INSERT INTO entries(label) VALUES ('lost') RETURNING id",
+            transaction=transaction,
+        )
+        await invoke(storage, "rollback", transaction=transaction)
+        assert await invoke(
+            storage, "query", sql="SELECT count(*) AS n FROM entries"
+        ) == [{"n": 1}]
+
+
 async def test_expired_transaction_rolls_back(storage):
     with caller(deadline=time.time() + 0.08):
         tx = (await invoke(storage, "begin", mutation_id="expires"))["transaction"]
@@ -313,3 +341,13 @@ async def test_schema_inspection_is_read_only_and_can_reconcile_lost_ack(storage
         after = await storage.invoke(ADMIN_SERVICE, "inspect", {"owner": "alpha"})
         assert before["revision"] == "v1" and after["revision"] == "v2"
         assert after["history"][: len(before["history"])] == before["history"]
+
+
+async def test_returning_requires_a_mutation(storage):
+    with caller(), pytest.raises(PluginError, match="Use query"):
+        await invoke(
+            storage,
+            "execute_returning",
+            sql="SELECT 1",
+            mutation_id="invalid-returning",
+        )
