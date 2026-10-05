@@ -6,6 +6,13 @@ the host supplies application, owner, generation, root and deadline identity.
 No file path or raw connection is returned. This is lifecycle/data ownership
 isolation for trusted local plugins, not an operating-system sandbox.
 
+Install the provider into a running application before enabling plugins that
+require managed SQL:
+
+```sh
+toolframe --home APP plugin add /path/to/toolframe_storage_sqlite-0.3.1-py3-none-any.whl --enable
+```
+
 Normal SQL supports queries, mutations, indexes declared in migrations, and
 same-store transactions. Runtime DDL, transaction control, attachment, PRAGMAs
 and provider metadata access are denied by SQLite's authorizer. Transactions are
@@ -21,6 +28,8 @@ holder free to finish its next RPC. Committed-state reads and other owners can
 proceed while a transaction is open. Return all writes within a transaction through
 its transaction client/token; a second unscoped writer from the same root/store
 is rejected as `nested_transaction` instead of waiting on itself.
+A queued transaction also reserves its root/store: await an earlier write before
+beginning a transaction, and await `begin` before issuing its token-bound writes.
 
 Each connection slot permits at most 128 waiting calls. Admission obeys the
 host-issued root deadline and cancellation; a full queue returns `storage_busy`

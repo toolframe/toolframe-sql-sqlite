@@ -465,8 +465,9 @@ async def test_idle_connections_are_reused_and_do_not_retain_guards(
 
 
 @pytest.mark.parametrize("finish", ["timeout", "cancel", "root_cleanup"])
+@pytest.mark.parametrize("method", ["execute", "begin"])
 async def test_waiting_writer_can_end_without_leaking_a_slot_or_writing(
-    storage, finish
+    storage, finish, method
 ):
     with caller(root="holder"):
         transaction = (await invoke(storage, "begin", mutation_id="holder"))[
@@ -478,7 +479,7 @@ async def test_waiting_writer_can_end_without_leaking_a_slot_or_writing(
         with caller(root="waiter", deadline=deadline):
             return await invoke(
                 storage,
-                "execute",
+                method,
                 sql="INSERT INTO entries(label) VALUES ('cancelled')",
                 mutation_id="cancelled",
             )
@@ -501,6 +502,9 @@ async def test_waiting_writer_can_end_without_leaking_a_slot_or_writing(
             await pending
     with caller(root="holder"):
         await invoke(storage, "rollback", transaction=transaction)
+    with caller(root="waiter"):
+        retry = (await invoke(storage, "begin", mutation_id="retry"))["transaction"]
+        await invoke(storage, "rollback", transaction=retry)
     with caller(root="fresh"):
         await asyncio.wait_for(
             invoke(
@@ -618,7 +622,53 @@ async def test_second_unscoped_write_from_transaction_root_is_rejected(storage):
         await invoke(storage, "rollback", transaction=transaction)
 
 
-async def test_failed_connection_open_does_not_exhaust_pool(storage, monkeypatch):
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("begin", "begin"),
+        ("begin", "execute"),
+        ("begin", "execute_returning"),
+        ("execute", "begin"),
+        ("execute_returning", "begin"),
+    ],
+)
+async def test_same_root_cannot_queue_a_transaction_with_another_writer(
+    storage, first, second
+):
+    with caller(root="holder"):
+        held = (await invoke(storage, "begin", mutation_id="holder"))["transaction"]
+
+    async def write(method, mutation):
+        with caller(root="queued"):
+            params = {"mutation_id": mutation}
+            if method != "begin":
+                params["sql"] = "INSERT INTO entries(label) VALUES ('queued')"
+                if method == "execute_returning":
+                    params["sql"] += " RETURNING id"
+            return await invoke(storage, method, **params)
+
+    pending = asyncio.create_task(write(first, "first"))
+    try:
+        await asyncio.sleep(0)
+        assert not pending.done()
+        with pytest.raises(PluginError) as failure:
+            await asyncio.wait_for(write(second, "second"), 0.2)
+        assert failure.value.code == "nested_transaction"
+    finally:
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        with caller(root="holder"):
+            await invoke(storage, "rollback", transaction=held)
+    # Cancelled admission must not poison the next transaction from this root.
+    with caller(root="queued"):
+        retry = (await invoke(storage, "begin", mutation_id="retry"))["transaction"]
+        await invoke(storage, "rollback", transaction=retry)
+
+
+@pytest.mark.parametrize("method", ["query", "begin"])
+async def test_failed_connection_open_does_not_exhaust_pool(
+    storage, monkeypatch, method
+):
     connect = storage.connect
     attempts = 0
 
@@ -632,7 +682,13 @@ async def test_failed_connection_open_does_not_exhaust_pool(storage, monkeypatch
     monkeypatch.setattr(storage, "connect", fail_once)
     with caller():
         with pytest.raises(PluginError, match="Temporarily"):
-            await invoke(storage, "query", sql="SELECT * FROM entries")
+            await invoke(
+                storage, method, sql="SELECT * FROM entries", mutation_id="failed-open"
+            )
+        transaction = (await invoke(storage, "begin", mutation_id="retry"))[
+            "transaction"
+        ]
+        await invoke(storage, "rollback", transaction=transaction)
         assert (
             await asyncio.wait_for(
                 invoke(storage, "query", sql="SELECT * FROM entries"), 1

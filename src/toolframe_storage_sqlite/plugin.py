@@ -129,6 +129,8 @@ class SqliteProvider(Plugin):
         self.transactions: dict[str, Transaction] = {}
         self.pools: dict[tuple[str, str, bool], ConnectionPool] = {}
         self.waiting: dict[str, set[asyncio.Task]] = {}
+        self.pending_writers: dict[tuple[str, str, str, str], int] = {}
+        self.pending_transactions: set[tuple[str, str, str, str]] = set()
         self.closed = False
         self.sweeper = None
 
@@ -354,21 +356,31 @@ class SqliteProvider(Plugin):
             finally:
                 transaction.pool.release(transaction.connection)
 
-    async def borrow(self, owner, info, *, write):
+    async def borrow(self, owner, info, *, write, begin=False):
         if self.closed:
             raise PluginError("storage_stopped", "Storage connections are closed")
         if not (self.directory / owner / "data.sqlite").is_file():
             raise PluginError(
                 "store_missing", "Store must be initialized before business activation"
             )
-        if write and any(
-            (transaction.owner, transaction.generation, transaction.root_id)
-            == (owner, info["owner_generation"], info["root_id"])
-            for transaction in self.transactions.values()
+        writer = (
+            info["application_id"],
+            owner,
+            info["owner_generation"],
+            info["root_id"],
+        )
+        if write and (
+            writer in self.pending_transactions
+            or (begin and self.pending_writers.get(writer, 0))
+            or any(
+                (transaction.owner, transaction.generation, transaction.root_id)
+                == writer[1:]
+                for transaction in self.transactions.values()
+            )
         ):
             raise PluginError(
                 "nested_transaction",
-                "Use the active transaction token for writes from the same root/store",
+                "Await pending writes and use the transaction token for the same root/store",
             )
         key = (info["application_id"], owner, write)
         pool = self.pools.get(key)
@@ -377,9 +389,21 @@ class SqliteProvider(Plugin):
         task = asyncio.current_task()
         root = info["root_id"]
         self.waiting.setdefault(root, set()).add(task)
+        # Reserve admission before yielding: a queued begin must not end up
+        # holding the writer while another unscoped call from its root waits.
+        if write:
+            self.pending_writers[writer] = self.pending_writers.get(writer, 0) + 1
+            if begin:
+                self.pending_transactions.add(writer)
         try:
             return pool, await pool.acquire(info["deadline"])
         finally:
+            if write:
+                self.pending_writers[writer] -= 1
+                if not self.pending_writers[writer]:
+                    del self.pending_writers[writer]
+                if begin:
+                    self.pending_transactions.discard(writer)
             self.waiting[root].discard(task)
             if not self.waiting[root]:
                 del self.waiting[root]
@@ -469,7 +493,10 @@ class SqliteProvider(Plugin):
             ):
                 raise PluginError("method_not_found", method)
             pool, connection = await self.borrow(
-                owner, info, write=method in ("begin", "execute", "execute_returning")
+                owner,
+                info,
+                write=method in ("begin", "execute", "execute_returning"),
+                begin=method == "begin",
             )
         keep = transaction is not None
         cursor = None
