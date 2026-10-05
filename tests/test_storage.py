@@ -351,3 +351,330 @@ async def test_returning_requires_a_mutation(storage):
             sql="SELECT 1",
             mutation_id="invalid-returning",
         )
+
+
+async def test_concurrent_transactions_queue_without_business_locks(storage):
+    with caller():
+        for index in range(10):
+            await invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES ('available')",
+                mutation_id=f"stock-{index}",
+            )
+
+    async def reserve(index):
+        with caller(root=f"reservation-{index}"):
+            transaction = None
+            try:
+                transaction = (
+                    await invoke(storage, "begin", mutation_id=f"reservation-{index}")
+                )["transaction"]
+                # A real business transaction spans multiple RPC requests.
+                await asyncio.sleep(0)
+                result = await invoke(
+                    storage,
+                    "execute",
+                    sql="DELETE FROM entries WHERE id=(SELECT id FROM entries LIMIT 1)",
+                    transaction=transaction,
+                )
+                await invoke(storage, "commit", transaction=transaction)
+                return "reserved" if result["rowcount"] else "insufficient_stock"
+            except PluginError as error:
+                if transaction:
+                    await invoke(storage, "rollback", transaction=transaction)
+                return error.code
+
+    results = await asyncio.gather(*(reserve(index) for index in range(20)))
+    assert sorted(results) == ["insufficient_stock"] * 10 + ["reserved"] * 10
+
+
+async def test_queued_standalone_write_does_not_block_readers_or_other_owners(storage):
+    with caller(root="holder"):
+        transaction = (await invoke(storage, "begin", mutation_id="holder"))[
+            "transaction"
+        ]
+        await invoke(
+            storage,
+            "execute",
+            sql="INSERT INTO entries(label) VALUES ('uncommitted')",
+            transaction=transaction,
+        )
+
+    async def write():
+        with caller(root="queued"):
+            return await invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES ('queued')",
+                mutation_id="queued",
+            )
+
+    pending = asyncio.create_task(write())
+    try:
+        await asyncio.sleep(0)
+        assert not pending.done()
+        with caller(root="reader"):
+            assert await invoke(storage, "query", sql="SELECT * FROM entries") == []
+        with caller(owner="beta", root="independent"):
+            assert (
+                await invoke(
+                    storage,
+                    "execute",
+                    sql="INSERT INTO entries(label) VALUES ('independent')",
+                    mutation_id="independent",
+                )
+            )["rowcount"] == 1
+        with caller(root="holder"):
+            await invoke(storage, "commit", transaction=transaction)
+        assert (await asyncio.wait_for(pending, 1))["rowcount"] == 1
+    finally:
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+
+
+async def test_idle_connections_are_reused_and_do_not_retain_guards(
+    storage, monkeypatch
+):
+    opened = []
+    connect = sqlite3.connect
+
+    def track(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", track)
+    for index in range(5):
+        with caller(root=f"pooled-{index}"):
+            await invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES (?)",
+                parameters=[str(index)],
+                mutation_id=f"pooled-{index}",
+            )
+            assert await invoke(
+                storage, "query", sql="SELECT count(*) AS n FROM entries"
+            ) == [{"n": index + 1}]
+            assert (await invoke(storage, "receipt", mutation_id=f"pooled-{index}"))[
+                "receipt"
+            ]["rowcount"] == 1
+    assert len(opened) == 2
+
+
+@pytest.mark.parametrize("finish", ["timeout", "cancel", "root_cleanup"])
+async def test_waiting_writer_can_end_without_leaking_a_slot_or_writing(
+    storage, finish
+):
+    with caller(root="holder"):
+        transaction = (await invoke(storage, "begin", mutation_id="holder"))[
+            "transaction"
+        ]
+
+    async def wait():
+        deadline = time.time() + (0.05 if finish == "timeout" else 10)
+        with caller(root="waiter", deadline=deadline):
+            return await invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES ('cancelled')",
+                mutation_id="cancelled",
+            )
+
+    pending = asyncio.create_task(wait())
+    await asyncio.sleep(0)
+    if finish == "timeout":
+        with pytest.raises(PluginError) as failure:
+            await asyncio.wait_for(pending, 1)
+        assert failure.value.code == "deadline_exceeded"
+    else:
+        if finish == "cancel":
+            pending.cancel()
+        else:
+            with caller(admin=True):
+                await storage.invoke(
+                    ADMIN_SERVICE, "cleanup_root", {"root_id": "waiter"}
+                )
+        with pytest.raises(asyncio.CancelledError):
+            await pending
+    with caller(root="holder"):
+        await invoke(storage, "rollback", transaction=transaction)
+    with caller(root="fresh"):
+        await asyncio.wait_for(
+            invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES ('fresh')",
+                mutation_id="fresh",
+            ),
+            1,
+        )
+        assert await invoke(storage, "query", sql="SELECT label FROM entries") == [
+            {"label": "fresh"}
+        ]
+        assert (await invoke(storage, "receipt", mutation_id="cancelled"))[
+            "receipt"
+        ] is None
+
+
+async def test_root_loss_releases_writer_to_a_waiting_transaction(storage):
+    with caller(root="lost"):
+        transaction = (await invoke(storage, "begin", mutation_id="lost"))[
+            "transaction"
+        ]
+        await invoke(
+            storage,
+            "execute",
+            sql="INSERT INTO entries(label) VALUES ('lost')",
+            transaction=transaction,
+        )
+
+    async def begin():
+        with caller(root="next"):
+            return await invoke(storage, "begin", mutation_id="next")
+
+    pending = asyncio.create_task(begin())
+    await asyncio.sleep(0)
+    assert not pending.done()
+    with caller(admin=True):
+        await storage.invoke(ADMIN_SERVICE, "cleanup_root", {"root_id": "lost"})
+    next_transaction = (await asyncio.wait_for(pending, 1))["transaction"]
+    with caller(root="next"):
+        assert (
+            await invoke(
+                storage,
+                "query",
+                sql="SELECT * FROM entries",
+                transaction=next_transaction,
+            )
+            == []
+        )
+        await invoke(storage, "commit", transaction=next_transaction)
+
+
+async def test_dispose_closes_pools_and_rejects_waiters(storage):
+    with caller(root="holder"):
+        transaction = (await invoke(storage, "begin", mutation_id="holder"))[
+            "transaction"
+        ]
+        await invoke(
+            storage,
+            "execute",
+            sql="INSERT INTO entries(label) VALUES ('uncommitted')",
+            transaction=transaction,
+        )
+    with caller(root="reader"):
+        assert await invoke(storage, "query", sql="SELECT * FROM entries") == []
+
+    async def begin():
+        with caller(root="waiter"):
+            return await invoke(storage, "begin", mutation_id="waiter")
+
+    pending = asyncio.create_task(begin())
+    await asyncio.sleep(0)
+    await storage.dispose()
+    with pytest.raises(PluginError) as failure:
+        await asyncio.wait_for(pending, 1)
+    assert failure.value.code == "storage_stopped"
+    with sqlite3.connect(storage.directory / "alpha" / "data.sqlite") as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        assert connection.execute("SELECT * FROM entries").fetchall() == []
+
+
+async def test_concurrent_replayed_transaction_only_runs_once(storage):
+    async def write(index):
+        with caller(root=f"replay-{index}"):
+            result = await invoke(storage, "begin", mutation_id="same-write")
+            if result.get("committed"):
+                return result
+            transaction = result["transaction"]
+            await asyncio.sleep(0)
+            await invoke(
+                storage,
+                "execute",
+                sql="INSERT INTO entries(label) VALUES ('once')",
+                transaction=transaction,
+            )
+            return await invoke(storage, "commit", transaction=transaction)
+
+    results = await asyncio.gather(*(write(index) for index in range(20)))
+    assert results == [{"committed": True, "mutation_id": "same-write"}] * 20
+    with caller(root="reader"):
+        assert await invoke(storage, "query", sql="SELECT label FROM entries") == [
+            {"label": "once"}
+        ]
+
+
+async def test_second_unscoped_write_from_transaction_root_is_rejected(storage):
+    with caller():
+        transaction = (await invoke(storage, "begin", mutation_id="outer"))[
+            "transaction"
+        ]
+        with pytest.raises(PluginError) as failure:
+            await asyncio.wait_for(invoke(storage, "begin", mutation_id="nested"), 1)
+        assert failure.value.code == "nested_transaction"
+        await invoke(storage, "rollback", transaction=transaction)
+
+
+async def test_failed_connection_open_does_not_exhaust_pool(storage, monkeypatch):
+    connect = storage.connect
+    attempts = 0
+
+    def fail_once(owner, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise PluginError("store_missing", "Temporarily unavailable")
+        return connect(owner, **kwargs)
+
+    monkeypatch.setattr(storage, "connect", fail_once)
+    with caller():
+        with pytest.raises(PluginError, match="Temporarily"):
+            await invoke(storage, "query", sql="SELECT * FROM entries")
+        assert (
+            await asyncio.wait_for(
+                invoke(storage, "query", sql="SELECT * FROM entries"), 1
+            )
+            == []
+        )
+
+
+async def test_pooled_connections_cannot_cross_application_identity(storage):
+    with caller():
+        await invoke(storage, "query", sql="SELECT * FROM entries")
+        with pytest.raises(PluginError) as failure:
+            token = call_context.set(
+                {**call_context.get(), "application_id": "other-app"}
+            )
+            try:
+                await invoke(storage, "query", sql="SELECT * FROM entries")
+            finally:
+                call_context.reset(token)
+        assert failure.value.code == "store_identity_mismatch"
+
+
+async def test_writer_queue_has_bounded_backpressure(storage):
+    with caller(root="holder"):
+        transaction = (await invoke(storage, "begin", mutation_id="holder"))[
+            "transaction"
+        ]
+
+    async def begin(index):
+        with caller(root=f"waiter-{index}"):
+            return await invoke(storage, "begin", mutation_id=f"waiter-{index}")
+
+    pending = [asyncio.create_task(begin(index)) for index in range(129)]
+    try:
+        await asyncio.sleep(0)
+        assert all(not task.done() for task in pending[:-1])
+        with pytest.raises(PluginError) as failure:
+            await pending[-1]
+        assert failure.value.code == "storage_busy"
+    finally:
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+    with caller(root="holder"):
+        await invoke(storage, "rollback", transaction=transaction)

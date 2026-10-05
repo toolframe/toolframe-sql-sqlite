@@ -20,6 +20,8 @@ from toolframe_sdk import (
     digest,
 )
 
+from .pool import ConnectionPool
+
 SQL_SERVICE = "toolframe.storage.sql"
 ADMIN_SERVICE = "toolframe.storage.admin"
 
@@ -116,6 +118,7 @@ class Transaction:
     root_id: str
     deadline: float
     mutation_id: str
+    pool: ConnectionPool
     poisoned: bool = False
 
 
@@ -124,6 +127,9 @@ class SqliteProvider(Plugin):
         super().__init__(context)
         self.directory = None
         self.transactions: dict[str, Transaction] = {}
+        self.pools: dict[tuple[str, str, bool], ConnectionPool] = {}
+        self.waiting: dict[str, set[asyncio.Task]] = {}
+        self.closed = False
         self.sweeper = None
 
     async def activate(self):
@@ -144,6 +150,9 @@ class SqliteProvider(Plugin):
                     self._rollback(token)
 
     async def dispose(self):
+        self.closed = True
+        for pool in self.pools.values():
+            pool.close()
         if self.sweeper:
             self.sweeper.cancel()
             await asyncio.gather(self.sweeper, return_exceptions=True)
@@ -183,35 +192,41 @@ class SqliteProvider(Plugin):
         connection = sqlite3.connect(
             path, isolation_level=None, timeout=0.05, cached_statements=0
         )
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys=ON")
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA busy_timeout=50")
-        if create:
-            connection.executescript("""
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA busy_timeout=50")
+            if create:
+                connection.executescript("""
                 CREATE TABLE IF NOT EXISTS _toolframe_identity(owner TEXT PRIMARY KEY, application_id TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS _toolframe_migrations(position INTEGER PRIMARY KEY, revision TEXT UNIQUE NOT NULL, checksum TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS _toolframe_receipts(id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, result TEXT NOT NULL);
             """)
-        identity = connection.execute("SELECT * FROM _toolframe_identity").fetchone()
-        application_id = self.context.call_info["application_id"]
-        if identity and (
-            identity["owner"] != owner or identity["application_id"] != application_id
-        ):
-            connection.close()
-            raise PluginError(
-                "store_identity_mismatch",
-                "Database belongs to a different application or plugin",
-            )
-        if identity is None:
-            if not create:
-                connection.close()
+            identity = connection.execute(
+                "SELECT * FROM _toolframe_identity"
+            ).fetchone()
+            application_id = self.context.call_info["application_id"]
+            if identity and (
+                identity["owner"] != owner
+                or identity["application_id"] != application_id
+            ):
                 raise PluginError(
-                    "store_identity_missing", "Store has no initialized identity"
+                    "store_identity_mismatch",
+                    "Database belongs to a different application or plugin",
                 )
-            connection.execute(
-                "INSERT INTO _toolframe_identity VALUES(?,?)", (owner, application_id)
-            )
+            if identity is None:
+                if not create:
+                    raise PluginError(
+                        "store_identity_missing", "Store has no initialized identity"
+                    )
+                connection.execute(
+                    "INSERT INTO _toolframe_identity VALUES(?,?)",
+                    (owner, application_id),
+                )
+        except BaseException:
+            connection.close()
+            raise
         return connection
 
     def inspect(self, owner):
@@ -332,9 +347,42 @@ class SqliteProvider(Plugin):
     def _rollback(self, token):
         transaction = self.transactions.pop(token, None)
         if transaction:
-            transaction.connection.set_authorizer(None)
-            transaction.connection.rollback()
-            transaction.connection.close()
+            try:
+                transaction.connection.set_authorizer(None)
+                transaction.connection.set_progress_handler(None, 0)
+                transaction.connection.rollback()
+            finally:
+                transaction.pool.release(transaction.connection)
+
+    async def borrow(self, owner, info, *, write):
+        if self.closed:
+            raise PluginError("storage_stopped", "Storage connections are closed")
+        if not (self.directory / owner / "data.sqlite").is_file():
+            raise PluginError(
+                "store_missing", "Store must be initialized before business activation"
+            )
+        if write and any(
+            (transaction.owner, transaction.generation, transaction.root_id)
+            == (owner, info["owner_generation"], info["root_id"])
+            for transaction in self.transactions.values()
+        ):
+            raise PluginError(
+                "nested_transaction",
+                "Use the active transaction token for writes from the same root/store",
+            )
+        key = (info["application_id"], owner, write)
+        pool = self.pools.get(key)
+        if pool is None:
+            pool = self.pools[key] = ConnectionPool(lambda: self.connect(owner))
+        task = asyncio.current_task()
+        root = info["root_id"]
+        self.waiting.setdefault(root, set()).add(task)
+        try:
+            return pool, await pool.acquire(info["deadline"])
+        finally:
+            self.waiting[root].discard(task)
+            if not self.waiting[root]:
+                del self.waiting[root]
 
     def _transaction(self, token, owner, info):
         transaction = self.transactions.get(token)
@@ -379,6 +427,8 @@ class SqliteProvider(Plugin):
             if method == "cleanup_root":
                 if not self.context.call_info.get("management"):
                     raise PluginError("forbidden", "Root cleanup is host-only")
+                for task in tuple(self.waiting.get(params["root_id"], ())):
+                    task.cancel()
                 for token, transaction in list(self.transactions.items()):
                     if transaction.root_id == params["root_id"]:
                         self._rollback(token)
@@ -403,10 +453,29 @@ class SqliteProvider(Plugin):
                 "transaction_poisoned",
                 "A failed statement poisoned this transaction; roll it back",
             )
-        connection = transaction.connection if transaction else self.connect(owner)
+        if transaction:
+            pool, connection = transaction.pool, transaction.connection
+        else:
+            if method in ("commit", "rollback"):
+                raise PluginError(
+                    "transaction_required", "A transaction token is required"
+                )
+            if method not in (
+                "query",
+                "execute",
+                "execute_returning",
+                "begin",
+                "receipt",
+            ):
+                raise PluginError("method_not_found", method)
+            pool, connection = await self.borrow(
+                owner, info, write=method in ("begin", "execute", "execute_returning")
+            )
         keep = transaction is not None
+        cursor = None
         try:
             connection.set_authorizer(None)
+            connection.set_progress_handler(None, 0)
             if method == "receipt":
                 return {"receipt": self.receipt(connection, self.mutation_id(params))}
             if method == "begin":
@@ -427,6 +496,7 @@ class SqliteProvider(Plugin):
                     info["root_id"],
                     info["deadline"],
                     mutation_id,
+                    pool,
                 )
                 keep = True
                 return {"transaction": token, "mutation_id": mutation_id}
@@ -449,7 +519,7 @@ class SqliteProvider(Plugin):
                 )
                 connection.commit()
                 self.transactions.pop(token)
-                connection.close()
+                pool.release(connection)
                 return result
             if method not in ("query", "execute", "execute_returning"):
                 raise PluginError("method_not_found", method)
@@ -532,8 +602,10 @@ class SqliteProvider(Plugin):
                 raise
             raise PluginError("sql_failed", str(error)) from error
         finally:
+            if cursor is not None:
+                cursor.close()
             if not keep:
-                connection.close()
+                pool.release(connection)
 
 
 plugin = PluginDefinition(
