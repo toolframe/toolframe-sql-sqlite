@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 sdk_source=${TOOLFRAME_SDK_SOURCE:-"$repo_root/../toolframe-sdk"}
-sdk_revision=a9000ab6ad9743a8f68b5ae3ef7c54fdbf15d6de
+sdk_revision=871416a9f9cbcfa79298235781ff193e1ad08a12
 python_version=3.14.7
 output=${1:-"$repo_root/dist/ci"}
 
