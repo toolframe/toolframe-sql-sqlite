@@ -10,7 +10,7 @@ Install the provider into a running application before enabling plugins that
 require managed SQL:
 
 ```sh
-toolframe --home APP plugin add /path/to/toolframe_storage_sqlite-0.3.1-py3-none-any.whl --enable
+toolframe --home APP plugin add pypi:toolframe-storage-sqlite==0.3.1 --enable
 ```
 
 Normal SQL supports queries, mutations, indexes declared in migrations, and
@@ -56,6 +56,8 @@ published SDK contract.
 
 For isolated local validation, GitHub Actions and manual TestPyPI/PyPI publishing,
 see [CI and publishing](docs/ci.md).
+
+For release validation and Trusted Publisher setup, see [releasing](docs/releasing.md).
 
 ## License
 

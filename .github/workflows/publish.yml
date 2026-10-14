@@ -36,7 +36,7 @@ jobs:
   validate:
     needs: release-tag
     uses: ./.github/workflows/ci.yml
-
+    secrets: inherit
   publish:
     needs: validate
     if: github.ref_type == 'tag'

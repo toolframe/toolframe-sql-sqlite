@@ -4,7 +4,7 @@
 
 Install Python 3.14.7, uv 0.12.8, Git and Bash. Keep a readable sibling
 `../toolframe-sdk` Git checkout containing commit
-`871416a9f9cbcfa79298235781ff193e1ad08a12`. Then run:
+`ef91b609137a5fe7bae8e0c893e74b096ff06ffe`. Then run:
 
 ```sh
 uv python install 3.14.7
@@ -51,44 +51,11 @@ GitHub repositories. The SDK repository name is `toolframe-sdk`; its owner defau
 to `github.repository_owner`. Set the repository variable
 `TOOLFRAME_REPOSITORY_OWNER` when the SDK has a different trusted owner. A fork PR
 uses the base repository's owner/variable, never the contributor's fork owner.
-This checkout configuration expects a publicly readable SDK repository. A private
-SDK needs a separately designed read-only cross-repository credential policy;
-the default `GITHUB_TOKEN` cannot read arbitrary private siblings, and fork PRs
-must not receive repository secrets.
+Public siblings need no additional token. Private SDK access uses the optional
+read-only `TOOLFRAME_READ_TOKEN` described in [releasing](releasing.md). The default
+`GITHUB_TOKEN` cannot read private siblings; untrusted fork PRs receive no secrets.
 
-## Publishing setup and use
+## Publication
 
-Publishing is manual only. `publish.yml` offers `testpypi` (default) and `pypi`.
-The selected run ref must be exactly `refs/tags/v<project.version>`; the current
-version requires `v0.2.0`. A branch run or mismatched tag fails before validation.
-The reusable CI validates the same run revision, and the publishing job downloads
-its exact artifact without rebuilding. Only that job receives `id-token: write`.
-No PR run uploads packages, and no API token is needed.
-
-Before the first upload:
-
-1. Create GitHub environments named `testpypi` and `pypi`, with release-tag
-   restrictions and any required reviewers appropriate to the repository.
-2. On **each** registry, configure a Trusted Publisher (or pending publisher)
-   for project `toolframe-storage-sqlite`: the actual GitHub owner, repository
-   `toolframe-storage-sqlite`, workflow filename `publish.yml`, and environment
-   `testpypi` or `pypi` respectively. TestPyPI and PyPI are separate services.
-3. Make `toolframe-sdk==0.2.0` available to consumers on their chosen index before
-   expecting normal installation to succeed. CI's temporary SDK wheel is not
-   uploaded with this provider. Production PyPI consumers need the SDK on PyPI;
-   TestPyPI may lack runtime dependencies, so test installation must supply them
-   deliberately, as the local validation does with the pinned SDK wheel and PyPI.
-4. Commit the intended release, create and push its matching version tag, then
-   dispatch **Publish Python package** on that tag with the desired registry.
-   For example, a future operator can run
-   `gh workflow run publish.yml --ref v0.2.0 -f registry=testpypi`.
-   After checking TestPyPI, dispatch on the same tag with `registry=pypi`.
-
-Duplicate uploads fail rather than being silently skipped. Publishing files and
-configuration does not perform deployment: no tag push, registry registration or
-package upload is part of local validation.
-
-References: [uv CI integration](https://docs.astral.sh/uv/guides/integration/github/),
-[PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/using-a-publisher/),
-[PyPA publish action](https://github.com/pypa/gh-action-pypi-publish), and
-[GitHub runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+See [releasing](releasing.md) for dependency order, private repository access,
+Trusted Publisher bindings, version tags and consumer installation checks.
