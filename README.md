@@ -68,3 +68,5 @@ returns `rows` and `rowcount`, including within transactions and durable mutatio
 receipts. Existing SQLite SQL, migration checksums and `execute` results are
 preserved; PostgreSQL variants in migration declarations do not change SQLite
 history.
+
+For development hooks and contribution rules, see [Contributing](CONTRIBUTING.md).
