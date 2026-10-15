@@ -39,9 +39,10 @@ actionlint .github/workflows/ci.yml .github/workflows/publish.yml
 
 ## GitHub Actions
 
-`ci.yml` runs for pull requests, pushes and manual dispatches, and is reusable by
-`publish.yml`. It runs the same script on `ubuntu-24.04` with Python 3.14.7 and
-uv 0.12.8, retaining `python-distributions` for seven days after successful checks.
+`ci.yml` runs for pull requests, pushes to `main` and manual dispatches, and is
+reusable by `publish.yml`. It runs the same script on `ubuntu-24.04` with
+Python 3.14.7 and uv 0.12.8, retaining `python-distributions` for seven days after
+successful checks.
 All actions are pinned to full commit IDs. Default permissions are `contents: read`;
 checkout credentials are not persisted. The reusable workflow has no concurrency
 group that could cancel its caller.
