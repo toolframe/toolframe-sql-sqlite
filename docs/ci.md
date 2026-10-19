@@ -4,11 +4,11 @@
 
 Install Python 3.14.7, uv 0.12.8, Git and Bash. Keep a readable sibling
 `../toolframe-sdk` Git checkout containing commit
-`ef91b609137a5fe7bae8e0c893e74b096ff06ffe`. Then run:
+`2cd153ec36c585a9adb5ad566effc2985d9e222d`. Then run:
 
 ```sh
 uv python install 3.14.7
-bash scripts/validate.sh /tmp/toolframe-storage-sqlite-validated-dist
+bash scripts/validate.sh /tmp/toolframe-sql-sqlite-validated-dist
 ```
 
 The output directory must be empty or absent. Use a new directory for another run.

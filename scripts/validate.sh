@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 sdk_source=${TOOLFRAME_SDK_SOURCE:-"$repo_root/../toolframe-sdk"}
-sdk_revision=ef91b609137a5fe7bae8e0c893e74b096ff06ffe
+sdk_revision=2cd153ec36c585a9adb5ad566effc2985d9e222d
 python_version=3.14.7
 output=${1:-"$repo_root/dist/ci"}
 
@@ -20,7 +20,7 @@ if [[ -n "$(ls -A "$output")" ]]; then
 fi
 git -C "$sdk_source" cat-file -e "$sdk_revision^{commit}"
 
-work_root=$(mktemp -d "${TMPDIR:-/tmp}/toolframe-storage-sqlite-ci.XXXXXX")
+work_root=$(mktemp -d "${TMPDIR:-/tmp}/toolframe-sql-sqlite-ci.XXXXXX")
 trap 'rm -rf "$work_root"' EXIT
 echo "Isolated workspace: $work_root"
 echo "SDK revision: $sdk_revision"
@@ -30,7 +30,7 @@ export UV_PROJECT_ENVIRONMENT="$work_root/test-venv"
 export UV_PYTHON="$python_version"
 export UV_LINK_MODE=copy
 
-project="$work_root/toolframe-storage-sqlite"
+project="$work_root/toolframe-sql-sqlite"
 mkdir -p "$project" "$work_root/toolframe-sdk" "$work_root/wheelhouse" "$work_root/dist"
 # Include current tracked and untracked, non-ignored files, never an existing venv/dist.
 git -C "$repo_root" ls-files --cached --others --exclude-standard -z \
@@ -97,17 +97,17 @@ from pathlib import Path
 import jsonschema
 import pydantic
 import toolframe_sdk
-import toolframe_storage_sqlite
-from toolframe_storage_sqlite.plugin import SqliteProvider
+import toolframe_sql_sqlite
+from toolframe_sql_sqlite.plugin import SqliteProvider
 
-for module in (toolframe_sdk, toolframe_storage_sqlite, pydantic, jsonschema):
+for module in (toolframe_sdk, toolframe_sql_sqlite, pydantic, jsonschema):
     assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve())
     print(f"Installed import: {module.__name__} -> {module.__file__}")
-for package in ("toolframe-sdk", "toolframe-storage-sqlite"):
+for package in ("toolframe-sdk", "toolframe-sql-sqlite"):
     direct_url = json.loads(distribution(package).read_text("direct_url.json") or "{}")
     assert not direct_url.get("dir_info", {}).get("editable", False)
     print(f"Installed distribution: {package}=={version(package)}")
-plugins = entry_points(group="toolframe.plugins", name="storage-sqlite")
+plugins = entry_points(group="toolframe.plugins", name="sql-sqlite")
 assert len(plugins) == 1
 assert next(iter(plugins)).load().factory.endswith(":" + SqliteProvider.__name__)
 print("Installed wheel imports and plugin entry point passed")

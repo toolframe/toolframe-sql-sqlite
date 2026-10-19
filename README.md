@@ -1,7 +1,7 @@
 # Toolframe SQLite provider
 
-`storage-sqlite` owns `data/plugins/<plugin-id>/data.sqlite`, separately from core's
-management database. Plugins use `RuntimeContext.storage()` and parameterized SQL;
+`sql-sqlite` owns `data/plugins/<plugin-id>/data.sqlite`, separately from core's
+management database. Plugins use `RuntimeContext.sql()` and parameterized SQL;
 the host supplies application, owner, generation, root and deadline identity.
 No file path or raw connection is returned. This is lifecycle/data ownership
 isolation for trusted local plugins, not an operating-system sandbox.
@@ -10,7 +10,7 @@ Install the provider into a running application before enabling plugins that
 require managed SQL:
 
 ```sh
-toolframe --home APP plugin add pypi:toolframe-storage-sqlite==0.3.1 --enable
+toolframe --home APP plugin add pypi:toolframe-sql-sqlite==0.4.0 --enable
 ```
 
 Normal SQL supports queries, mutations, indexes declared in migrations, and
@@ -46,8 +46,8 @@ rolls back failures. Nontransactional statements are rejected. Committed schema
 changes are never automatically reverted; backups require an explicit operator
 repair workflow. Disabling/uninstalling a plugin retains its database.
 
-The `toolframe.storage.admin` service is host-only. Business plugins declare a
-requirement on `toolframe.storage.sql` version 1. Cross-plugin data access uses the
+The `toolframe.sql.admin` service is host-only. Business plugins declare a
+requirement on `toolframe.sql` version 1. Cross-plugin data access uses the
 owning plugin's business service. There are no cross-database transactions.
 
 Development: `uv sync --group dev`, `uv run pytest -q`, `uv build --no-sources`.

@@ -22,8 +22,8 @@ from toolframe_sdk import (
 
 from .pool import ConnectionPool
 
-SQL_SERVICE = "toolframe.storage.sql"
-ADMIN_SERVICE = "toolframe.storage.admin"
+SQL_SERVICE = "toolframe.sql"
+ADMIN_SERVICE = "toolframe.sql.admin"
 
 
 def encoded(value):
@@ -636,10 +636,10 @@ class SqliteProvider(Plugin):
 
 
 plugin = PluginDefinition(
-    id="storage-sqlite",
+    id="sql-sqlite",
     kind="provider",
-    provider_kind="storage",
-    factory="toolframe_storage_sqlite.plugin:SqliteProvider",
+    provider_kind="sql",
+    factory="toolframe_sql_sqlite.plugin:SqliteProvider",
     authorization=AuthorizationSpec(),
     services={
         SQL_SERVICE: ServiceSpec(

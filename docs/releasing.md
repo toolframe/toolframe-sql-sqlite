@@ -1,6 +1,6 @@
-# Releasing toolframe-storage-sqlite
+# Releasing toolframe-sql-sqlite
 
-The distribution name is `toolframe-storage-sqlite`; its current version is `0.3.1`.
+The distribution name is `toolframe-sql-sqlite`; its current version is `0.3.1`.
 Release tags must exactly match `v<project.version>`. Ordinary CI never uploads
 packages. The manual `publish.yml` workflow reruns validation and publishes only
 artifacts produced by that successful run.
@@ -10,7 +10,7 @@ artifacts produced by that successful run.
 Run the repository's existing validation workflow; its local commands and
 integration coverage are described in [CI](ci.md).
 
-Publish `toolframe-sdk==0.3.0` first. The coordinated order and native CLI channels are documented in
+Publish `toolframe-sdk==0.4.0` first. The coordinated order and native CLI channels are documented in
 [Toolframe's release guide](https://github.com/toolframe/toolframe-core/blob/main/docs/releasing.md).
 
 ## Trusted Publishers
@@ -20,9 +20,9 @@ package index, configure a normal or pending Trusted Publisher with these values
 
 | Field | Value |
 | --- | --- |
-| Project | `toolframe-storage-sqlite` |
+| Project | `toolframe-sql-sqlite` |
 | GitHub owner | `toolframe` |
-| GitHub repository | `toolframe-storage-sqlite` |
+| GitHub repository | `toolframe-sql-sqlite` |
 | Workflow filename | `publish.yml` |
 | Environment | `testpypi` or `pypi`, matching the index |
 
@@ -49,7 +49,7 @@ After PyPI publication, verify a clean installation:
 
 ```sh
 uv venv --python 3.14.7 build/consumer
-uv pip install --python build/consumer/bin/python 'toolframe-storage-sqlite==0.3.1'
+uv pip install --python build/consumer/bin/python 'toolframe-sql-sqlite==0.4.0'
 uv pip check --python build/consumer/bin/python
 ```
 

@@ -12,7 +12,7 @@ from toolframe_sdk import (
     call_context,
 )
 
-from toolframe_storage_sqlite.plugin import ADMIN_SERVICE, SQL_SERVICE, SqliteProvider
+from toolframe_sql_sqlite.plugin import ADMIN_SERVICE, SQL_SERVICE, SqliteProvider
 
 
 @contextmanager
@@ -56,7 +56,7 @@ async def storage(tmp_path):
     provider = SqliteProvider(
         RuntimeContext(
             None,
-            plugin_id="storage-sqlite",
+            plugin_id="sql-sqlite",
             generation="storage-generation",
             state_directory=tmp_path,
         )
