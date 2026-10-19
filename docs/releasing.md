@@ -1,6 +1,6 @@
 # Releasing toolframe-sql-sqlite
 
-The distribution name is `toolframe-sql-sqlite`; its current version is `0.3.1`.
+The distribution name is `toolframe-sql-sqlite`. The version is defined in `pyproject.toml`.
 Release tags must exactly match `v<project.version>`. Ordinary CI never uploads
 packages. The manual `publish.yml` workflow reruns validation and publishes only
 artifacts produced by that successful run.
