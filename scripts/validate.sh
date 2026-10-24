@@ -4,7 +4,7 @@ set -euo pipefail
 
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 sdk_source=${TOOLFRAME_SDK_SOURCE:-"$repo_root/../toolframe-sdk"}
-sdk_revision=2cd153ec36c585a9adb5ad566effc2985d9e222d
+sdk_revision=539ced4dbdf9e303ec0f0205a35d65287a480b2a
 python_version=3.14.7
 output=${1:-"$repo_root/dist/ci"}
 
@@ -59,6 +59,7 @@ import tarfile
 import tomllib
 import zipfile
 from pathlib import Path
+from packaging.requirements import Requirement
 
 dist, project = map(Path, sys.argv[1:])
 metadata = tomllib.loads((project / "pyproject.toml").read_text())["project"]
@@ -71,7 +72,7 @@ with zipfile.ZipFile(wheels[0]) as wheel, tarfile.open(sdists[0]) as sdist:
     assert wheel_metadata["Name"] == metadata["name"]
     assert wheel_metadata["Version"] == metadata["version"]
     assert wheel_metadata["License-Expression"] == metadata["license"]
-    assert wheel_metadata.get_all("Requires-Dist") == metadata["dependencies"]
+    assert {Requirement(value) for value in wheel_metadata.get_all("Requires-Dist")} == {Requirement(value) for value in metadata["dependencies"]}
     for filename in ("LICENSE", "NOTICE"):
         wheel_path = next(name for name in wheel.namelist() if name.endswith(f"/licenses/{filename}"))
         sdist_path = next(name for name in sdist.getnames() if name.endswith(f"/{filename}"))

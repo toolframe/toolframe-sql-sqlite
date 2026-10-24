@@ -10,7 +10,7 @@ artifacts produced by that successful run.
 Run the repository's existing validation workflow; its local commands and
 integration coverage are described in [CI](ci.md).
 
-Publish `toolframe-sdk==0.4.0` first. The coordinated order and native CLI channels are documented in
+Publish `toolframe-sdk==0.4.1` first. The coordinated order and native CLI channels are documented in
 [Toolframe's release guide](https://github.com/toolframe/toolframe-core/blob/main/docs/releasing.md).
 
 ## Trusted Publishers
@@ -40,7 +40,7 @@ sibling owner where the workflow exposes that variable.
 ## Publish and verify
 
 After the release commit and matching tag are available remotely, manually run
-`publish.yml` at `v0.3.1`, selecting `testpypi` first and then `pypi`.
+`publish.yml` at `v0.4.1`, selecting `testpypi` first and then `pypi`.
 A branch or mismatched tag is rejected. Downloaded files are the artifacts from
 that run; the publishing job does not rebuild them. Published files cannot be
 replaced under the same version.
@@ -49,7 +49,7 @@ After PyPI publication, verify a clean installation:
 
 ```sh
 uv venv --python 3.14.7 build/consumer
-uv pip install --python build/consumer/bin/python 'toolframe-sql-sqlite==0.4.0'
+uv pip install --python build/consumer/bin/python 'toolframe-sql-sqlite==0.4.1'
 uv pip check --python build/consumer/bin/python
 ```
 

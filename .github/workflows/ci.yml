@@ -26,7 +26,7 @@ jobs:
         with:
           repository: ${{ vars.TOOLFRAME_REPOSITORY_OWNER || github.repository_owner }}/toolframe-sdk
           token: ${{ secrets.TOOLFRAME_READ_TOKEN || github.token }}
-          ref: 2cd153ec36c585a9adb5ad566effc2985d9e222d
+          ref: 539ced4dbdf9e303ec0f0205a35d65287a480b2a
           path: toolframe-sdk
           persist-credentials: false
 
