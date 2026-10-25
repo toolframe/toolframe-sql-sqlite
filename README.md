@@ -54,7 +54,7 @@ Development: `uv sync --group dev`, `uv run pytest -q`, `uv build --no-sources`.
 The sibling SDK UV source is a development convenience; wheels depend only on the
 published SDK contract.
 
-For isolated local validation, GitHub Actions and manual TestPyPI/PyPI publishing,
+For isolated local validation, GitHub Actions and manual PyPI publishing,
 see [CI and publishing](docs/ci.md).
 
 For release validation and Trusted Publisher setup, see [releasing](docs/releasing.md).

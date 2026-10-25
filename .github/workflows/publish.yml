@@ -2,21 +2,12 @@ name: Publish Python package
 
 on:
   workflow_dispatch:
-    inputs:
-      registry:
-        description: Package registry
-        type: choice
-        required: true
-        default: testpypi
-        options:
-          - testpypi
-          - pypi
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-${{ inputs.registry }}-${{ github.ref }}
+  group: publish-pypi-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -43,7 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment:
-      name: ${{ inputs.registry }}
+      name: pypi
     permissions:
       id-token: write
     steps:
@@ -53,12 +44,5 @@ jobs:
           name: python-distributions
           path: dist
 
-      - name: Publish to TestPyPI
-        if: inputs.registry == 'testpypi'
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
-        with:
-          repository-url: https://test.pypi.org/legacy/
-
       - name: Publish to PyPI
-        if: inputs.registry == 'pypi'
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
