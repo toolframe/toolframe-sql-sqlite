@@ -70,3 +70,6 @@ preserved; PostgreSQL variants in migration declarations do not change SQLite
 history.
 
 For development hooks and contribution rules, see [Contributing](CONTRIBUTING.md).
+
+Plugin dependencies allow compatible SDK 0.x updates from the declared minimum.
+See the [SDK compatibility policy](https://github.com/toolframe/toolframe-sdk/blob/main/docs/compatibility.md) for API guarantees and minimum/latest verification.
