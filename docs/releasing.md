@@ -10,7 +10,8 @@ artifacts produced by that successful run.
 Run the repository's existing validation workflow; its local commands and
 integration coverage are described in [CI](ci.md).
 
-Publish `toolframe-sdk==0.4.1` first. The coordinated order and native CLI channels are documented in
+Publish any newly required SDK version before the plugin. Compatible Core or SDK
+updates alone do not require a plugin release. The coordinated order and native CLI channels are documented in
 [Toolframe's release guide](https://github.com/toolframe/toolframe-core/blob/main/docs/releasing.md).
 
 ## Trusted Publishers
