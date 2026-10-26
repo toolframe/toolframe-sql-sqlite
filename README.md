@@ -1,75 +1,47 @@
-# Toolframe SQLite provider
+<p align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-banner-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-banner-light.png">
+  <img src="docs/assets/readme-banner-light.png" alt="Toolframe SQLite — Give each Toolframe plugin a managed SQLite database." width="720">
+</picture>
+</p>
 
-`sql-sqlite` owns `data/plugins/<plugin-id>/data.sqlite`, separately from core's
-management database. Plugins use `RuntimeContext.sql()` and parameterized SQL;
-the host supplies application, owner, generation, root and deadline identity.
-No file path or raw connection is returned. This is lifecycle/data ownership
-isolation for trusted local plugins, not an operating-system sandbox.
+# Toolframe SQLite
 
-Install the provider into a running application before enabling plugins that
-require managed SQL:
+[![CI on main](https://github.com/toolframe/toolframe-sql-sqlite/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/toolframe/toolframe-sql-sqlite/actions/workflows/ci.yml?query=branch%3Amain)
+
+Give each Toolframe plugin a managed SQLite database.
+Plugins use scoped SQL clients while the provider owns connections, transactions and migrations.
+
+## Quick start
+
+In a running [Toolframe application](https://github.com/toolframe/toolframe-core#readme):
 
 ```sh
-toolframe --home APP plugin add pypi:toolframe-sql-sqlite==0.4.0 --enable
+toolframe --home APP plugin add pypi:toolframe-sql-sqlite==0.4.2 --enable
 ```
 
-Normal SQL supports queries, mutations, indexes declared in migrations, and
-same-store transactions. Runtime DDL, transaction control, attachment, PRAGMAs
-and provider metadata access are denied by SQLite's authorizer. Transactions are
-bound to one root/generation and roll back on expiry, root loss or disposal. A
-statement failure poisons a transaction. Mutation IDs and same-database receipts
-allow callers to resolve an unknown acknowledgement without repeating a write.
+Enable this provider before plugins that require `toolframe.sql`. Use Python
+3.14+ and SDK 0.4+. Business code calls `RuntimeContext.sql()`; database paths and
+raw connections remain private to the provider.
 
-Each application/owner store lazily pools one writer connection and one separate
-reader connection. A transaction retains the writer until commit, rollback,
-expiry or root cleanup; standalone mutations use the same writer. Other writes
-wait asynchronously instead of opening competing write connections, leaving the
-holder free to finish its next RPC. Committed-state reads and other owners can
-proceed while a transaction is open. Return all writes within a transaction through
-its transaction client/token; a second unscoped writer from the same root/store
-is rejected as `nested_transaction` instead of waiting on itself.
-A queued transaction also reserves its root/store: await an earlier write before
-beginning a transaction, and await `begin` before issuing its token-bound writes.
+**Storage:** databases live at `data/plugins/<plugin-id>/data.sqlite` and survive
+disable or uninstall. Existing schema changes require an explicit migration plan
+and backup. Transactions cover one store; cross-plugin access goes through the
+owning business service. Plugins are trusted code.
 
-Each connection slot permits at most 128 waiting calls. Admission obeys the
-host-issued root deadline and cancellation; a full queue returns `storage_busy`
-before that call runs SQL. Connections are reset before reuse and closed on
-provider disposal. This coordinates one provider process, not arbitrary external
-SQLite writers. SQL execution is still synchronous and external lock contention
-retains SQLite's 50ms busy timeout. Pooling does not provide business idempotency
-or make long-running SQL nonblocking.
+## Guides
 
-Empty stores initialize automatically. Existing schema changes require a core
-migration plan and explicit apply. Apply checks the plan/history, uses SQLite's
-backup API, executes all pending migrations and history in one transaction, and
-rolls back failures. Nontransactional statements are rejected. Committed schema
-changes are never automatically reverted; backups require an explicit operator
-repair workflow. Disabling/uninstalling a plugin retains its database.
+| I want to… | Start here |
+| --- | --- |
+| Use transactions and migrations | [Storage behavior](docs/storage.md) |
+| Write portable SQL | [SDK storage](https://github.com/toolframe/toolframe-sdk/blob/main/docs/storage.md) |
+| Operate application storage | [Core SQL guide](https://github.com/toolframe/toolframe-core/blob/main/docs/sql-storage.md) |
+| Contribute or run checks | [Contributing](CONTRIBUTING.md) · [Verification](docs/ci.md) |
+| Publish a package | [Releasing](docs/releasing.md) |
 
-The `toolframe.sql.admin` service is host-only. Business plugins declare a
-requirement on `toolframe.sql` version 1. Cross-plugin data access uses the
-owning plugin's business service. There are no cross-database transactions.
-
-Development: `uv sync --group dev`, `uv run pytest -q`, `uv build --no-sources`.
-The sibling SDK UV source is a development convenience; wheels depend only on the
-published SDK contract.
-
-For isolated local validation, GitHub Actions and manual PyPI publishing,
-see [CI and publishing](docs/ci.md).
-
-For release validation and Trusted Publisher setup, see [releasing](docs/releasing.md).
+[Releases](https://github.com/toolframe/toolframe-sql-sqlite/releases)
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
-Version 0.3 adds `execute_returning` for mutations with a `RETURNING` clause. It
-returns `rows` and `rowcount`, including within transactions and durable mutation
-receipts. Existing SQLite SQL, migration checksums and `execute` results are
-preserved; PostgreSQL variants in migration declarations do not change SQLite
-history.
-
-For development hooks and contribution rules, see [Contributing](CONTRIBUTING.md).
-
-Plugin dependencies allow compatible SDK 0.x updates from the declared minimum.
-See the [SDK compatibility policy](https://github.com/toolframe/toolframe-sdk/blob/main/docs/compatibility.md) for API guarantees and minimum/latest verification.
+[Apache 2.0](LICENSE), with [NOTICE](NOTICE).
